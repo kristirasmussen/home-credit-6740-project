@@ -8,25 +8,21 @@ Created on Thu Oct 20 16:39:57 2020
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.decomposition import PCA
-from itertools import product
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 from sklearn import metrics
 from sklearn.svm import SVC
-from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LassoCV
 from sklearn.tree import DecisionTreeClassifier
 from sklearn import tree
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.preprocessing import StandardScaler
+
 import time
 
 start_time = time.time()
@@ -183,62 +179,12 @@ prev_credit_agg['AVG_TOT_REC_PAST_DUE_INTERR'] = prev_credit_agg['AVG_AMT_TOT_RE
 
 
 # =============================================================================
-# Merge Cleaned Data
+# Merge Cleaned Data, Make Categorical Dummy Variables, and Split to Train/Test
 # =============================================================================
 
 app_train_expanded = reduce(lambda left,right: pd.merge(left,right,on=['SK_ID_CURR'],how='left'), [app_train,bureau_agg_final,modified_installment,prev_pos_cash_agg,prev_credit_agg])
 
-# app_train_expanded = app_train_expanded.replace(np.nan,0).replace(np.inf,0)
-
-# =============================================================================
-# Perform Variable Selection/Feature Reduction
-# =============================================================================
-
-# # split into numeric/categorical categories
-# app_train_expanded_categorical = app_train_expanded.loc[:,app_train_expanded.dtypes==np.object]
-# app_train_expanded_numeric = app_train_expanded.loc[:,app_train_expanded.dtypes!=np.object]
-
-# X = app_train_expanded_numeric.drop(columns=["TARGET"]).replace(np.nan,0).replace(np.inf,0)
-# y = app_train_expanded_numeric[["TARGET"]]
-
-# # run LASSO regression to find important columns
-# clf = LassoCV().fit(X, y)
-# importance = np.abs(clf.coef_)
-# # print(importance)
-
-# tmp = X.head()
-
-# tmp.iloc[:,114]
-# # 114: AMT_CREDIT_SUM_sum
-# # 163: INSTALLMENT_PAYMENT_DIFFERENCE_VAR
-
-# # drop those two aggregated columns because they overpowered the other
-# X_v2 = X.drop(X.columns[[114,163]],axis=1)
-
-# # run LASSO again
-# clf = LassoCV().fit(X_v2, y)
-# importance = np.abs(clf.coef_)
-
-# # extract important columns
-# importance_df = pd.DataFrame(importance).reset_index()
-# importance_df.columns = ['index','importance']
-# keep_numeric_cols = list(importance_df[importance_df['importance'] != 0]['index'])
-
-# # skinny down the numeric columns that are important
-# skinny_numeric = app_train_expanded_numeric.iloc[:,keep_numeric_cols]
-# skinny_numeric_cols = skinny_numeric.columns
-
-# # extract categorical column names
-# skinny_categorical_cols = app_train_expanded_categorical.columns
-
-# # list of column names to include for our modeling
-# keep_cols = list(skinny_numeric_cols) + list(skinny_categorical_cols) + ['TARGET']
-# good_data = app_train_expanded[keep_cols]
-
-
-# =============================================================================
-# Perform Variable Selection/Feature Reduction - VERSION 2
-# =============================================================================
+app_train_expanded = app_train_expanded.replace(np.inf,np.nan)
 
 # split into numeric/categorical categories
 app_train_expanded_categorical = app_train_expanded.loc[:,app_train_expanded.dtypes==np.object]
@@ -247,64 +193,32 @@ app_train_expanded_categorical = app_train_expanded.loc[:,app_train_expanded.dty
 categorical_cols = app_train_expanded_categorical.columns
 app_train_dummies = pd.get_dummies(app_train_expanded, columns=categorical_cols,dummy_na='nan_as_category')
 
-# app_train_expanded_numeric = app_train_expanded.loc[:,app_train_expanded.dtypes!=np.object]
+# remove values where 1,000 years employed
+app_train_dummies['DAYS_EMPLOYED'].replace(365243, np.nan, inplace=True)
 
-X = app_train_dummies.drop(columns=["TARGET"])
-y = app_train_dummies[["TARGET"]]
+# impute missing values
+from sklearn.impute import SimpleImputer
+imp_median = SimpleImputer(strategy='median')
+imp_median.fit(app_train_dummies)
+imp_median_data = imp_median.transform(app_train_dummies)
 
-# run LASSO regression to find important columns
-clf = LassoCV().fit(X, y)
-importance = np.abs(clf.coef_)
-# print(importance)
-
-tmp = X.head()
-
-tmp.iloc[:,114]
-# 114: AMT_CREDIT_SUM_sum
-# 163: INSTALLMENT_PAYMENT_DIFFERENCE_VAR
-
-# drop those two aggregated columns because they overpowered the other
-X_v2 = X.drop(X.columns[[114,163]],axis=1)
-
-# run LASSO again
-clf = LassoCV().fit(X_v2, y)
-importance = np.abs(clf.coef_)
-
-# extract important columns
-importance_df = pd.DataFrame(importance).reset_index()
-importance_df.columns = ['index','importance']
-skinny_cols = list(importance_df[importance_df['importance'] != 0]['index'])
-
-# skinny down the numeric columns that are important
-skinny_data = app_train_dummies.iloc[:,skinny_cols]
-skinny_data_cols = skinny_data.columns
-
-# # extract categorical column names
-# skinny_categorical_cols = app_train_expanded_categorical.columns
-
-# list of column names to include for our modeling
-keep_cols = list(skinny_data_cols) + ['TARGET']
-good_data = app_train_expanded[keep_cols]
+app_train_dummies = pd.DataFrame(imp_median_data, columns=app_train_dummies.columns)
 
 
-# =============================================================================
-# Split into Train/Test Sets, Model, and Report Accuracy
-# =============================================================================
-
-data = good_data.drop(columns=["TARGET","SK_ID_CURR"]).replace(np.nan,0)
-label = good_data[["TARGET"]]
+# split into data and label sets
+data = app_train_dummies.drop(columns=["TARGET","SK_ID_CURR"])
+label = app_train_dummies[["TARGET"]]
 
 scaler = StandardScaler().fit(data)
 data_scaled = scaler.transform(data)
 data_scaled = pd.DataFrame(data_scaled, columns=data.columns)
 
-
 random_seed = 42
 
-# randomly split data to 80% training, 20% testing
-X_train,X_test,y_train,y_test=train_test_split(data,label,test_size=.2,random_state=random_seed)
+# Scaled - randomly split data to 80% training, 20% testing
+X_train,X_test,y_train,y_test=train_test_split(data_scaled,label,test_size=.2,random_state=random_seed)
 
-# downsample train data
+# downsample train data - scaled
 X_train_full = X_train.merge(y_train, how='inner', left_index=True, right_index=True)
 X_train_full['TARGET'].value_counts()
 X_train_zero = X_train_full[X_train_full["TARGET"] == 0]
@@ -315,22 +229,31 @@ X_train_final = pd.concat([X_train_sample,X_train_one], axis=0)
 X_train = X_train_final.drop(columns=["TARGET"])
 y_train = X_train_final[["TARGET"]]
 
-# Scaled - randomly split data to 80% training, 20% testing
-X_train_scaled,X_test_scaled,y_train_scaled,y_test_scaled=train_test_split(data,label,test_size=.2,random_state=random_seed)
 
-# downsample train data - scaled
-X_train_full = X_train_scaled.merge(y_train_scaled, how='inner', left_index=True, right_index=True)
-X_train_full['TARGET'].value_counts()
-X_train_zero = X_train_full[X_train_full["TARGET"] == 0]
-X_train_one = X_train_full[X_train_full["TARGET"] == 1]
-X_train_sample = X_train_zero.sample(n=19876)
-X_train_final = pd.concat([X_train_sample,X_train_one], axis=0)
+# =============================================================================
+# Perform Variable Selection/Feature Reduction
+# =============================================================================
 
-X_train_scaled = X_train_final.drop(columns=["TARGET"])
-y_train_scaled = X_train_final[["TARGET"]]
+# run LASSO regression to find important columns
+clf = LassoCV().fit(X_train, y_train)
+importance = np.abs(clf.coef_)
 
+# extract important columns
+importance_df = pd.DataFrame(importance).reset_index()
+importance_df.columns = ['index','importance']
+skinny_cols = list(importance_df[importance_df['importance'] >= 0.02]['index'])
 
-# RF, Logistic, Naive Bayes, KNN ?
+# skinny down the numeric columns that are important
+skinny_data = X_train.iloc[:,skinny_cols]
+skinny_data_cols = skinny_data.columns
+
+# list of column names to include for our modeling
+keep_cols = list(skinny_data_cols)
+good_data = X_train[keep_cols]
+
+# =============================================================================
+# Make Models
+# =============================================================================
 
 results = []
 
@@ -364,10 +287,10 @@ print('NB:\n', confusion_matrix(y_test, nb_ypred_test))
 
 
 ######## KNN ########
-knn = KNeighborsClassifier(n_neighbors=3,n_jobs=-1).fit(X_train_scaled, y_train_scaled)
-knn_ypred_test = knn.predict(X_test_scaled)
-results.append(get_metrics('KNN', y_test_scaled, knn_ypred_test))
-print('KNN:\n', confusion_matrix(y_test_scaled, knn_ypred_test))
+knn = KNeighborsClassifier(n_neighbors=3,n_jobs=-1).fit(X_train, y_train)
+knn_ypred_test = knn.predict(X_test)
+results.append(get_metrics('KNN', y_test, knn_ypred_test))
+print('KNN:\n', confusion_matrix(y_test, knn_ypred_test))
 
 
 ######## Logistic Regression ########
@@ -378,26 +301,11 @@ print('Log Reg:\n', confusion_matrix(y_test, logReg_ypred_test))
 
 
 ######## Linear SVM ########
-svm = SVC(max_iter=200, kernel='linear').fit(X_train_scaled, y_train_scaled)
-svm_ypred_test = svm.predict(X_test_scaled)
-results.append(get_metrics('Linear SVM', y_test_scaled, svm_ypred_test))
-print('Linear SVM:\n', confusion_matrix(y_test_scaled, svm_ypred_test))
+svm = SVC(max_iter=200, kernel='linear').fit(X_train, y_train)
+svm_ypred_test = svm.predict(X_test)
+results.append(get_metrics('Linear SVM', y_test, svm_ypred_test))
+print('Linear SVM:\n', confusion_matrix(y_test, svm_ypred_test))
 
-
-######## Non-Linear SVM ########
-# determine gamma based on median trick
-import math
-from scipy.spatial.distance import pdist
-import statistics
-ndownsample = 5000
-M = statistics.median(pdist(X_train_scaled[0:ndownsample], metric='euclidean')**2)
-sigma = math.sqrt(M/2)
-gamma = 0.5 / (sigma**2)
-
-ksvm = SVC(gamma=gamma).fit(X_train_scaled, y_train_scaled)
-ksvm_ypred_test = ksvm.predict(X_test_scaled)
-results.append(get_metrics('Kernel SVM', y_test_scaled, ksvm_ypred_test))
-print('Kernel SVM:\n', confusion_matrix(y_test_scaled, ksvm_ypred_test))
 
 results_df = pd.DataFrame(results)
 
