@@ -257,11 +257,10 @@ skinny_data_cols = skinny_data.columns
 
 # list of column names to include for our modeling
 keep_cols = list(skinny_data_cols)
+
+# apply keep list to X_train and X_test
 X_train = X_train[keep_cols]
-
 X_test = X_test[keep_cols]
-
-
 
 
 # =============================================================================
@@ -323,9 +322,10 @@ svm_ypred_test = svm.predict(X_test)
 results.append(get_metrics('Linear SVM', y_test, svm_ypred_test))
 print('Linear SVM:\n', confusion_matrix(y_test, svm_ypred_test))
 
-
+# show results as dataframe
 results_df = pd.DataFrame(results)
 
 # code runtime
 end_time = time.time()
 print(round((end_time - start_time)/60,4), 'minutes')
+
