@@ -243,13 +243,26 @@ importance_df = pd.DataFrame(importance).reset_index()
 importance_df.columns = ['index','importance']
 skinny_cols = list(importance_df[importance_df['importance'] >= 0.02]['index'])
 
+# plot importance
+# col_names = pd.DataFrame(X_train.columns.T)
+# imp_df = pd.merge(col_names, importance_df, right_index=True,left_index=True)
+# imp_df.columns = ['column_name','index','importance']
+# imp_df2 = imp_df[["column_name","importance"]][imp_df['importance'] >= 0.02]
+# imp_df2.plot(kind='bar')
+
+
 # skinny down the numeric columns that are important
 skinny_data = X_train.iloc[:,skinny_cols]
 skinny_data_cols = skinny_data.columns
 
 # list of column names to include for our modeling
 keep_cols = list(skinny_data_cols)
-good_data = X_train[keep_cols]
+X_train = X_train[keep_cols]
+
+X_test = X_test[keep_cols]
+
+
+
 
 # =============================================================================
 # Make Models
@@ -295,7 +308,11 @@ print('KNN:\n', confusion_matrix(y_test, knn_ypred_test))
 
 ######## Logistic Regression ########
 logReg = LogisticRegression(max_iter=200, solver='liblinear').fit(X_train, y_train)
-logReg_ypred_test = logReg.predict(X_test)
+# logReg_ypred_test = logReg.predict(X_test)
+logReg_ypred_probs = pd.DataFrame(logReg.predict_proba(X_test))[1]
+logReg_ypred_test = pd.DataFrame(logReg_ypred_probs.copy())
+logReg_ypred_test.columns = ['pred']
+logReg_ypred_test['pred'] = np.where(logReg_ypred_test['pred'] >=0.65, 1, 0)
 results.append(get_metrics('Logistic Regression', y_test, logReg_ypred_test))
 print('Log Reg:\n', confusion_matrix(y_test, logReg_ypred_test))
 
@@ -312,6 +329,3 @@ results_df = pd.DataFrame(results)
 # code runtime
 end_time = time.time()
 print(round((end_time - start_time)/60,4), 'minutes')
-
-
-
